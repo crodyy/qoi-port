@@ -4,6 +4,15 @@ Every `scripts/verify.sh` run, pass or fail, appended here. No exceptions.
 
 ---
 
+### [color_hash] attempt 1 — PASS
+- Command: `cargo test color_hash` (WSL2, exit 0) — internal unit; no verify.sh script target exists for it (AGENTS.md), done-criterion per CLAUDE.md rule 3.
+- Image(s) tested: none (internal unit, tested in isolation).
+- Expected: exact slots from QOI_COLOR_HASH = r*3+g*5+b*7+a*11 (qoi.h:322), slot = hash & (64-1) (qoi.h:430/577). Constants verified independently in PowerShell before baking into assertions: (0,0,0,0)->0, (255,0,0,0)->61, (0,255,0,0)->59, (0,0,255,0)->57, (0,0,0,255)->53, (255,255,255,255)->38, (0,4,0,4)->0 (wrap), (10,20,30,40)->12, weights 3/5/7/11, collision pair (2,1,0,0)==(0,0,0,1)==11.
+- Actual: 6/6 color_hash tests pass.
+- Hypothesis: n/a (first attempt passed).
+- Fix applied: added `color_hash(r,g,b,a) -> usize` to src/main.rs computing in u32 (C int promotion, qoi.h:322) + 6 tests citing qoi.h line numbers.
+- Full-suite regression check: clean — `cargo test` full run 36 passed, 0 failed.
+
 ### 2026-07-31 16:59 IST — verify.sh --all — FAIL
 - Command: `scripts/verify.sh --all`
 - Exit code: 1

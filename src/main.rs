@@ -95,6 +95,15 @@ fn read_32(bytes: &[u8], p: &mut usize) -> u32 {
     a << 24 | b << 16 | c << 8 | d
 }
 
+// qoi.h:322 — QOI_COLOR_HASH(C) = C.rgba.r*3 + C.rgba.g*5 + C.rgba.b*7 + C.rgba.a*11.
+// Index-table slot is hash & (64 - 1) (encode write: qoi.h:430, decode write: qoi.h:577).
+// C promotes the uint8_t channels to int before multiplying; compute in u32 so
+// e.g. 255*11 cannot overflow. Shared by the encode AND decode index tables — the
+// decoder updates the table after every decoded pixel (qoi.h:577), not just index ops.
+fn color_hash(r: u8, g: u8, b: u8, a: u8) -> usize {
+    ((r as u32 * 3 + g as u32 * 5 + b as u32 * 7 + a as u32 * 11) % 64) as usize
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
     if args.len() != 4 {
@@ -123,7 +132,7 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_header, read_32, validate_desc, write_32, write_end_marker, write_header, Header, QOI_HEADER_SIZE, QOI_LINEAR, QOI_MAGIC, QOI_PADDING, QOI_PIXELS_MAX, QOI_SRGB};
+    use super::{color_hash, parse_header, read_32, validate_desc, write_32, write_end_marker, write_header, Header, QOI_HEADER_SIZE, QOI_LINEAR, QOI_MAGIC, QOI_PADDING, QOI_PIXELS_MAX, QOI_SRGB};
 
     fn header_bytes(width: u32, height: u32, channels: u8, colorspace: u8) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(QOI_HEADER_SIZE);
@@ -411,6 +420,58 @@ mod tests {
         assert!(!validate_desc(&Header { width: 1, height: 400000000, channels: 4, colorspace: QOI_SRGB }));
         assert!(!validate_desc(&Header { width: 400000000, height: 1, channels: 4, colorspace: QOI_SRGB }));
         assert!(!validate_desc(&Header { width: 200000000, height: 2, channels: 4, colorspace: QOI_SRGB }));
+    }
+
+    // qoi.h:322 — 0*3+0*5+0*7+0*11 = 0 -> slot 0. Also the state of every index[]
+    // entry after QOI_ZEROARR (qoi.h:361 encode, qoi.h:533 decode), so slot 0 is
+    // where the transparent-black pixel lands in a freshly-reset table.
+    #[test]
+    fn color_hash_zero_pixel_is_slot_zero() {
+        assert_eq!(color_hash(0, 0, 0, 0), 0);
+    }
+
+    // qoi.h:322 — channel weights are exactly r*3, g*5, b*7, a*11.
+    #[test]
+    fn color_hash_channel_weights() {
+        assert_eq!(color_hash(1, 0, 0, 0), 3);
+        assert_eq!(color_hash(0, 1, 0, 0), 5);
+        assert_eq!(color_hash(0, 0, 1, 0), 7);
+        assert_eq!(color_hash(0, 0, 0, 1), 11);
+    }
+
+    // qoi.h:322 — full-scale channels; would overflow u8 without the C-style int
+    // promotion (255*11 = 2805). Exact slots: 765%64=61, 1275%64=59, 1785%64=57,
+    // 2805%64=53. The last one is also the decoder's starting px {0,0,0,255}
+    // (qoi.h:534-537) and encoder's px_prev (qoi.h:396-399).
+    #[test]
+    fn color_hash_single_channel_255() {
+        assert_eq!(color_hash(255, 0, 0, 0), 61);
+        assert_eq!(color_hash(0, 255, 0, 0), 59);
+        assert_eq!(color_hash(0, 0, 255, 0), 57);
+        assert_eq!(color_hash(0, 0, 0, 255), 53);
+    }
+
+    // qoi.h:322 — 255*26 = 6630, slot = 6630 % 64 = 38.
+    #[test]
+    fn color_hash_white_opaque() {
+        assert_eq!(color_hash(255, 255, 255, 255), 38);
+    }
+
+    // Slot is hash & (64 - 1) (qoi.h:430 encode, qoi.h:577 decode), not the raw sum:
+    // (0,4,0,4): 0+20+0+44 = 64 -> wraps to slot 0; (10,20,30,40): 780 % 64 = 12.
+    #[test]
+    fn color_hash_wraps_mod_64() {
+        assert_eq!(color_hash(0, 4, 0, 4), 0);
+        assert_eq!(color_hash(10, 20, 30, 40), 12);
+    }
+
+    // Hash is a slot, not an identity: (2,1,0,0) = 2*3+1*5 = 11 collides with
+    // (0,0,0,1) = 11. The reference resolves collisions by comparing the full pixel
+    // value (qoi.h:432), so color_hash must NOT be treated as unique.
+    #[test]
+    fn color_hash_collisions_are_expected() {
+        assert_eq!(color_hash(2, 1, 0, 0), 11);
+        assert_eq!(color_hash(0, 0, 0, 1), 11);
     }
 }
 

@@ -11,7 +11,7 @@ Governing protocol: `CLAUDE.md` (rules, workflow loop, logging protocol) + `ledg
 
 ## Entrypoint & CLI
 - Built entrypoint is `src/main.rs`. Root-level `main.rs` is an orphan decoy (deliberately-wrong stub, **not compiled** by cargo) — don't edit or "fix" it.
-- Package `qoi_rust`, edition 2024, zero deps, bin only (no lib, no `cargo test`).
+- Package `qoi_rust`, edition 2024, zero deps, bin only (no lib). Unit tests live in `src/main.rs` under `#[cfg(test)]` and run via `cargo test` — that is the done-criterion for internal units per CLAUDE.md rule 3, so `cargo test <unit>` must stay usable.
 - Binary `target/release/qoi_rust`; contract: `encode <in.raw> <out.qoi>`, `decode <in.qoi> <out.decoded>`. Path must match `RUST_BIN` in `scripts/verify.sh`.
 - Build: `cargo build --release` from repo root. Done-criterion is `scripts/verify.sh <image_stem>` (e.g. `dice`) or `--all` exiting 0.
 
