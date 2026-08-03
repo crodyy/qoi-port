@@ -2,28 +2,28 @@
 
 This project is a **Rust port** of the original QOI reference implementation from [phoboslab/qoi](https://github.com/phoboslab/qoi).
 
-QOI (Quite OK Image) is a compact, lossless image format designed to be much simpler than PNG while still keeping good compression speed and quality for many image types.
+QOI (Quite OK Image) is a compact, lossless image format designed to be simpler than PNG while keeping strong practical performance.
 
 ## What this tool does
 
-This repository provides a command-line tool that can:
+This command-line tool can:
 - **Encode** raw pixel dumps into `.qoi`
 - **Decode** `.qoi` files back into raw pixel dumps
 
-The port is built to mirror the C reference behavior as closely as possible:
-- **Encode target:** byte-identical output
-- **Decode target:** pixel-identical output
+Port target behavior:
+- **Encode target:** byte-identical output to reference oracle files
+- **Decode target:** pixel-identical output to reference oracle files
 
 ## Quick start (first-time users)
 
-From the repository root:
-`/home/runner/work/qoi-port/qoi-port`
+Repository root:
+- `/home/runner/work/qoi-port/qoi-port`
 
-1. Build the binary:
+1. Build:
    ```bash
    cargo build --release
    ```
-2. Run tests:
+2. Run unit tests:
    ```bash
    cargo test
    ```
@@ -32,22 +32,20 @@ From the repository root:
    /home/runner/work/qoi-port/qoi-port/scripts/verify.sh --all
    ```
 
-If verification succeeds, your binary matches expected behavior on the official test corpus used in this repository.
-
 ## CLI usage
 
 Binary location:
 - `/home/runner/work/qoi-port/qoi-port/target/release/qoi_rust`
 
-Command contract:
+Commands:
 ```bash
-qoi_rust encode <input.raw> <output.qoi>
-qoi_rust decode <input.qoi> <output.decoded>
+/home/runner/work/qoi-port/qoi-port/target/release/qoi_rust encode <input.raw> <output.qoi>
+/home/runner/work/qoi-port/qoi-port/target/release/qoi_rust decode <input.qoi> <output.decoded>
 ```
 
 ## Input/output format (important)
 
-This project uses a **raw dump format** (not PNG I/O in the CLI):
+This CLI uses a **raw dump** pixel format (PNG I/O is out of scope for this binary):
 
 1. 4-byte big-endian width
 2. 4-byte big-endian height
@@ -60,7 +58,7 @@ So:
 
 ## Example with included test assets
 
-Encode one provided sample:
+Encode one included raw fixture:
 ```bash
 /home/runner/work/qoi-port/qoi-port/target/release/qoi_rust \
   encode \
@@ -68,7 +66,7 @@ Encode one provided sample:
   /home/runner/work/qoi-port/qoi-port/tmp_verify/dice.qoi
 ```
 
-Decode the oracle QOI sample:
+Decode one included oracle QOI:
 ```bash
 /home/runner/work/qoi-port/qoi-port/target/release/qoi_rust \
   decode \
@@ -76,24 +74,44 @@ Decode the oracle QOI sample:
   /home/runner/work/qoi-port/qoi-port/tmp_verify/dice.decoded
 ```
 
+## Bugs fixed through this porting process
+
+The process fixed important correctness and pipeline issues:
+
+1. **Raw fixture generation bug fixed**
+   - The old pipeline used an invalid temp extension (`.qoi.tmp`) for conversion output, which caused raw fixture generation to fail silently.
+2. **Decoded oracle format bug fixed**
+   - `oracle/outputs/*.decoded` were previously PNG files; they were migrated to the required raw-dump format so decode checks compare raw pixels correctly.
+3. **Test-quality bug fixed**
+   - A vacuous always-true decoder assertion was replaced with a real dispatch-order invariant check (RGBA-vs-RUN tag precedence).
+
+## Test statistics for organizers
+
+From final validation records:
+
+- **Unit tests:** `cargo test` → **97 passed, 0 failed**
+- **Oracle verification:** `scripts/verify.sh --all` → **8/8 images passed** on both encode and decode (**16 checks total**)
+- **Lint gate:** `cargo clippy --all-targets -- -D warnings` → **0 warnings**
+- **Run log summary:** `logs/run_log.md` currently records **14 PASS entries** and **2 FAIL entries** (early scaffolding stage)
+
 ## Hackathon correctness note
 
-For this porting hackathon, **exact test-case and edge-case behavior matters**.
-
-- `scripts/verify.sh` is the pass/fail authority.
-- Oracle files in `oracle/outputs` are treated as fixed expected outputs.
-- Edge cases must match reference behavior exactly; avoid “close enough” changes.
+For this hackathon, exact behavior on test and edge cases is required:
+- `scripts/verify.sh` is the pass/fail authority
+- Oracle outputs in `/home/runner/work/qoi-port/qoi-port/oracle/outputs` are fixed targets
+- Edge cases must match reference behavior (no file-specific hardcoding)
 
 Known expected quirk:
-- `edgecase.qoi` has a documented channel-field mismatch (`03` vs `04`) from historical oracle generation. Keep this behavior documented; do not special-case file-specific logic.
+- `edgecase.qoi` has a documented channel-field mismatch (`03` vs `04`) from historical oracle generation; keep it documented, do not special-case around filenames.
 
 ## Project paths you will use most
 
 - `/home/runner/work/qoi-port/qoi-port/src/main.rs` — Rust implementation
-- `/home/runner/work/qoi-port/qoi-port/scripts/verify.sh` — full verification script
+- `/home/runner/work/qoi-port/qoi-port/scripts/verify.sh` — oracle verification script
 - `/home/runner/work/qoi-port/qoi-port/oracle/raw` — raw encode fixtures
 - `/home/runner/work/qoi-port/qoi-port/oracle/outputs` — expected `.qoi` and `.decoded` outputs
 - `/home/runner/work/qoi-port/qoi-port/oracle-source/qoi_test_images` — source test-image set
+- `/home/runner/work/qoi-port/qoi-port/logs/run_log.md` — verification run history
 
 ## Read-only data policy
 
@@ -102,4 +120,4 @@ Do not modify these directories:
 - `/home/runner/work/qoi-port/qoi-port/oracle-source/`
 - `/home/runner/work/qoi-port/qoi-port/oracle/outputs/`
 
-They are part of the reproducibility contract for this QOI port.
+They are part of the reproducibility contract for this port.
