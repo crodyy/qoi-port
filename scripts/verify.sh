@@ -24,7 +24,7 @@ BUILD_DIR="$ROOT/target/release"
 RUST_BIN="$BUILD_DIR/qoi_rust"      # adjust to match your actual Cargo package/bin name
 FAIL=0
 
-mkdir -p "$RAW_DIR" "$ROOT/tmp_verify"
+mkdir -p "$RAW_DIR" "$ROOT/tmp_verify" "$ROOT/oracle/build"
 
 echo "== Building Rust port =="
 cargo build --release --manifest-path "$ROOT/Cargo.toml" || { echo "BUILD FAILED"; exit 1; }
@@ -32,7 +32,7 @@ cargo build --release --manifest-path "$ROOT/Cargo.toml" || { echo "BUILD FAILED
 # Ensure the raw-fixture generator is built
 if [ ! -x "$ROOT/oracle/build/mkraw" ]; then
   echo "== Building oracle/build/mkraw =="
-  gcc "$ROOT/oracle/build/mkraw.c" -std=c99 -O2 \
+  gcc "$ROOT/scripts/mkraw.c" -std=c99 -O2 \
       -I"$ROOT/oracle/stb" -I"$ROOT/reference/qoi" \
       -o "$ROOT/oracle/build/mkraw" || { echo "MKRAW BUILD FAILED"; exit 1; }
 fi
