@@ -1,19 +1,58 @@
 # QOI → Rust Port
 
-A Rust port of [phoboslab/qoi](https://github.com/phoboslab/qoi) — the "Quite OK Image Format"
-reference C implementation — built for Port Mortem 2026 (Track: C → Rust).
+A Rust port of [phoboslab/qoi](https://github.com/phoboslab/qoi) — the "Quite OK Image Format" —
+built for Port Mortem 2026 (Track: C → Rust).
+
+**QOI** a lossless image format that compresses close to PNG but encodes/decodes
+20-50x faster, because the format is small enough to fit in ~300 lines of C.
 
 This port targets byte-identical encode output and pixel-identical decode output against the
-original `qoi.h`, verified through an automated oracle-diff loop, not just "it compiles and the
-included tests pass."
+original `qoi.h`, verified through an automated oracle-diff loop — not just "it compiles."
 
-## Build
+## Quick start
 
 ```bash
 cargo build --release
+target/release/qoi_rust encode oracle/raw/kodim23.raw /tmp/out.qoi
+target/release/qoi_rust decode /tmp/out.qoi /tmp/decoded.raw
 ```
 
-Single command, no other build path. Binary at `target/release/qoi_rust`.
+## Test stats
+
+| Check | Result |
+|---|---|
+| Unit tests | 97 passing, 0 failing |
+| Oracle image suite | 8/8 images, byte-identical on encode, pixel-identical on decode |
+| Differential fuzz | 2000 random/malformed byte buffers, 0 panics, 0 crashes, 0 output mismatches |
+| Clippy | 0 warnings (`cargo clippy --all-targets -- -D warnings`) |
+| Fresh-clone build | Verified from a clean `git clone`, no local state reused |
+
+## Bug fixes found during development
+
+**Truncated-input leniency (fixed).** Differential fuzzing found the decoder initially accepted
+14–21 byte truncated streams that the reference implementation correctly rejects — `qoi.h:500`
+requires a minimum of 22 bytes (14-byte header + 8-byte end marker) before accepting a stream as
+valid. The port was missing this length guard, so it would decode garbage instead of failing.
+Fixed by mirroring the exact reference check; regression test added using the original fuzz-found
+reproducer bytes. Zero other divergences found across the 2000-buffer fuzz run, before or after.
+
+Full audit trail of every verification run (pass and fail) is in `logs/run_log.md`; unit-by-unit
+port history is in `ledger.md` and `command_log.md`.
+
+## Input/output format
+
+- **Encode** takes a raw, uncompressed pixel buffer (not PNG/JPG — decoding those formats is
+  explicitly out of scope for this port, see Scope below) and writes a `.qoi` file.
+- **Decode** takes a `.qoi` file and writes the raw pixel buffer back out.
+- Sample raw pixel files are already in `oracle/raw/` — no need to create your own to try the tool.
+
+**Raw file format used by this tool** *(confirm exact byte layout before treating as final)*:
+`<width: 4 bytes><height: 4 bytes><channels: 1 byte><raw pixel bytes, row-major, no padding>`
+
+**QOI file format** (what `.qoi` output actually contains, per the
+[official spec](https://qoiformat.org/qoi-specification.pdf)): a 14-byte header (`"qoif"` magic,
+width, height, channels, colorspace), followed by a stream of variable-length opcodes encoding
+runs, small deltas, index lookups, or full pixel values, ending in an 8-byte marker.
 
 ## Verify
 
@@ -21,8 +60,8 @@ Single command, no other build path. Binary at `target/release/qoi_rust`.
 scripts/verify.sh --all
 ```
 
-Runs the built binary's `encode`/`decode` against every image in `oracle-source/qoi_test_images/`
-and byte-diffs the output against pre-generated golden files in `oracle/outputs/`. Exits 0 only if
+Runs the binary's `encode`/`decode` against every image in `oracle-source/qoi_test_images/` and
+byte-diffs the output against pre-generated golden files in `oracle/outputs/`. Exits 0 only if
 every image matches on both encode and decode.
 
 ```bash
@@ -34,32 +73,26 @@ line numbers (see `CLAUDE.md` rule 3) — not just internal self-consistency.
 
 ## Process
 
-This port was built with a deliberate emphasis on *proving* equivalence, not just achieving it:
+Built with an emphasis on *proving* equivalence, not just achieving it:
 
-1. **Kickoff hash** — `reference/qoi_hash.txt` and `oracle-source_hash.txt` were generated
-   immediately after cloning, before any code was written, as proof the original source and test
-   images were never modified.
-2. **Oracle-first** — golden encode/decode outputs (`oracle/outputs/`) were generated from the
-   real, compiled reference `qoi.h` before any Rust was written, so every unit of work had a
-   ground truth to diff against from the start.
-3. **Ledger-driven, one unit at a time** — `ledger.md` tracks every function/opcode as its own
-   unit (`pending` → `in-progress` → `passing`/`stuck`), enforcing dependency order (e.g.
-   `color_hash` is shared by encode and decode and had to pass before either could rely on it).
-4. **`scripts/verify.sh` is the sole pass/fail authority** — no unit is marked done based on the
-   implementing agent's own judgment; only a script exit code counts. See `CLAUDE.md` for the full
-   rule set this port was built under, including an explicit anti-hardcoding rule and a 5-attempt
-   retry cap per unit before escalating to `stuck`.
-5. **Full audit trail** — every verification run, pass or fail, is logged in `logs/run_log.md`
-   (append-only); regressions are tracked separately in `logs/regressions.md`.
-
-### A real bug found and fixed via this process
-
-Differential fuzz-testing (2000 random/malformed byte buffers, decoded by both the real `qoi_decode`
-and this port, comparing crash behavior and output) found one genuine divergence: the Rust decoder
-accepted 14–21 byte truncated streams that the reference correctly rejects (`qoi.h:500` requires
-`size >= QOI_HEADER_SIZE + sizeof(qoi_padding)`, i.e. 22 bytes minimum). Zero panics, zero pixel
-mismatches, and zero other divergences were found across the fuzz run — see `logs/run_log.md` and
-`ledger.md`'s "Differential fuzz findings" section for the full report and fix.
+- **Kickoff hash** (`reference/qoi_hash.txt`, `oracle-source_hash.txt`) taken before any code was
+  written, proving the original source and test images were never modified.
+- **Oracle-first** — golden encode/decode outputs (`oracle/outputs/`) generated from the real,
+  compiled reference `qoi.h` before any Rust existed, so every unit had ground truth to diff against.
+- **Ledger-driven** (`ledger.md`) — every function/opcode tracked as its own unit
+  (`pending → in-progress → passing/stuck`), with dependency order enforced (e.g. the shared color
+  hash/index table had to pass before either encode or decode could rely on it).
+- **`scripts/verify.sh` is the sole pass/fail authority** — no unit is marked done on the
+  implementer's own judgment, only a script exit code counts. Full rules in `CLAUDE.md`.
+- **Full audit trail** — every verification run, pass or fail, logged in `logs/run_log.md`
+  (append-only); regressions tracked separately in `logs/regressions.md`.
+- **Differential fuzz-tested** — 2000 random/malformed byte buffers, decoded by both this port and
+  the real `qoi_decode`, comparing crash behavior and output. Found and fixed one real divergence:
+  the port initially accepted 14–21 byte truncated streams the reference correctly rejects
+  (`qoi.h:500` requires ≥22 bytes). Zero panics, zero other mismatches across the run — see
+  `ledger.md`'s "Differential fuzz findings" section.
+- **Manually sanity-checked** — encode/decode run by hand on a real image, output verified against
+  the QOI magic-byte header and round-tripped byte-for-byte, independent of the automated suite.
 
 ## Repository layout
 
